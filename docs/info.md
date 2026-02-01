@@ -9,11 +9,11 @@ You can also include images in this folder and reference them in the markdown. E
 
 ## How it works
 
-Explain how your project works
+SPI-controlled PWM peripheral for Tiny Tapeout. Configuration registers are written over SPI to control output enables and PWM duty cycle.
 
 ## How to test
 
-Explain how to use your project
+Testing using cocotb by sending SPI write transactions and checking outputs.
 
 ## External hardware
 
