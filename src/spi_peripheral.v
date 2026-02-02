@@ -31,16 +31,14 @@ always @ (posedge clk or negedge rst_n) begin //executes on every posedge and if
 end
 
 wire nCS_sync2 = nCS_sync[1]; //taking the stable value
-wire SCLK_sync2 = SCLK_sync[1];
-wire COPI_sync2 = COPI_sync[1];
+wire COPI_data = COPI_sync[0];
 
 
 //edge detection
 
-//when rising edge happens: prev is 0 and sync2 is 1
-reg SCLK_prev, nCS_prev; //stores prev state of signals to help detect edges
-wire SCLK_rising = ~SCLK_prev & SCLK_sync2;
-wire nCS_rising = ~nCS_prev & nCS_sync2;
+//comparing oldest samples 
+wire SCLK_rising = (SCLK_sync[1] === 1'b1) && (SCLK_sync[0] === 1'b0);
+wire nCS_rising = (nCS_sync[1] === 1'b1) && (nCS_sync[0] === 1'b0);
 
 always @(posedge clk or negedge rst_n) begin
     if(!rst_n) begin
@@ -56,30 +54,36 @@ end
 
 reg [4:0] bit_count; //up to 16 bits
 reg [15:0] shift_reg; //holds r/w address, data
-reg transaction_ready;
-reg transaction_processed;//for handshaking
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-        bit_count <= 0;
+        bit_count <= 5'd0;
         shift_reg <= 16'b0;
-        transaction_ready <= 1'b0;
     end else begin
-        transaction_ready <= 1'b0; //clearing by default
-
         if (!nCS_sync2) begin //spi transaction
-            if (SCLK_rising && bit_count < 16) begin
-                shift_reg <= {shift_reg[14:0], COPI_sync2};
-                bit_count <= bit_count + 1;
+            if (SCLK_rising) begin
+                shift_reg <= {shift_reg[14:0], COPI_data};
+                bit_count <= bit_count + 1'b1;
             end
         end else begin
-            //when nCS goes high, checking if we got exactly 16 bits
-            if (nCS_rising && (bit_count == 16)) begin 
-                transaction_ready <= 1'b1;
-            end else if (transaction_processed) begin
-                transaction_ready <= 1'b0;
-            end
-            bit_count <= 0; // reset for next transaction
+            bit_count <= 5'd0; // reset for next transaction
+        end
+    end
+end
+
+//transaction handshake
+
+reg transaction_ready;
+reg transaction_processed;
+
+always @(posedge clk or negedge rst_n) begin
+    if(!rst_n) begin
+        transaction_ready <= 1'b0;
+    end else begin
+        if(nCS_rising && bit_count == 16) begin
+            transaction_ready <= 1'b1;
+        end else if (transaction_processed) begin
+            transaction_ready <= 1'b0;
         end
     end
 end
@@ -102,14 +106,12 @@ always @(posedge clk or negedge rst_n) begin
             case (reg_addr)
                 7'h00: uo_out  <= data;
                 7'h01: uio_out <= data;
-                7'h02: uo_out  <= data;   
-                7'h03: uio_out <= data;  
-                7'h04: uo_out  <= data;   
+                //0x02-0x04 reserved for PWM
                 default: ;   
             endcase
         end
         transaction_processed <= 1'b1;
-    end else if (!transaction_ready) begin
+    end else if (!transaction_ready && transaction_processed) begin
         transaction_processed <= 1'b0;
     end
 end
