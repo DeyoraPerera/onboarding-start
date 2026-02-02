@@ -95,7 +95,7 @@ always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         uo_out  <= 8'h00;
         uio_out <= 8'h00;
-        transaction_processed < = 1'b0;
+        transaction_processed <= 1'b0;
     end else if (transaction_ready && !transaction_processed) begin 
         //updating reg only after entire transaction complete
         if (write_bit && reg_addr <= MAX_ADDRESS) begin
@@ -108,6 +108,9 @@ always @(posedge clk or negedge rst_n) begin
                 default: ;   
             endcase
         end
+        transaction_processed <= 1'b1;
+    end else if (!transaction_ready) begin
+        transaction_processed <= 1'b0;
     end
 end
 
