@@ -1,4 +1,6 @@
-`timescale 1ns/1ps
+
+`default_nettype none
+
 module spi_peripheral (
     input wire clk, //system clk
     input wire rst_n, //active-low reset
@@ -12,7 +14,7 @@ module spi_peripheral (
     output reg  [7:0] pwm_duty_cycle
 );
 
-localparam MAX_ADDRESS = 4; //max register address
+localparam [6:0] MAX_ADDRESS = 7'd4; //max register address
 
 //signal synchronization
 
@@ -69,7 +71,7 @@ always @(posedge clk or negedge rst_n) begin
         if (!nCS_stable) begin //spi transaction
             if (SCLK_rising) begin
                 shift_reg <= {shift_reg[14:0], COPI_data};
-                bit_count <= bit_count + 1'b1;
+                bit_count <= bit_count + 5'b1;
             end
         end else begin
             bit_count <= 5'd0; // reset for next transaction
@@ -86,7 +88,7 @@ always @(posedge clk or negedge rst_n) begin
     if(!rst_n) begin
         transaction_ready <= 1'b0;
     end else begin
-        if(nCS_rising && bit_count == 16) begin
+        if(nCS_rising && bit_count == 5'd16) begin
             transaction_ready <= 1'b1;
         end else if (transaction_processed) begin
             transaction_ready <= 1'b0;
