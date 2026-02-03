@@ -5,8 +5,11 @@ module spi_peripheral (
     input wire nCS, //SPI chip select
     input wire SCLK, //spi clock
     input wire COPI, //master Out, Slave in
-    output reg [7:0] uo_out, //ex output reg
-    output reg [7:0] uio_out //output reg 2
+    output reg  [7:0] en_reg_out_7_0,
+    output reg  [7:0] en_reg_out_15_8,
+    output reg  [7:0] en_reg_pwm_7_0,
+    output reg  [7:0] en_reg_pwm_15_8,
+    output reg  [7:0] pwm_duty_cycle
 );
 
 localparam MAX_ADDRESS = 4; //max register address
@@ -30,25 +33,28 @@ always @ (posedge clk or negedge rst_n) begin //executes on every posedge and if
 
 end
 
-wire nCS_sync2 = nCS_sync[1]; //taking the stable value
+wire nCS_stable = nCS_sync[1]; //taking the stable value
+wire SCLK_stable = SCLK_sync[1]; //taking the stable value
 wire COPI_data = COPI_sync[0];
 
 
 //edge detection
 
-//comparing oldest samples 
-wire SCLK_rising = (SCLK_sync[1] === 1'b1) && (SCLK_sync[0] === 1'b0);
-wire nCS_rising = (nCS_sync[1] === 1'b1) && (nCS_sync[0] === 1'b0);
+reg nCS_prev, SCLK_prev;
 
 always @(posedge clk or negedge rst_n) begin
-    if(!rst_n) begin
-        SCLK_prev <= 1'b0; //idle
-        nCS_prev <= 1'b1; //not selected
+    if (!rst_n) begin
+        nCS_prev  <= 1'b1; // idle high
+        SCLK_prev <= 1'b0; // idle low
     end else begin
-        SCLK_prev <= SCLK_sync2;
-        nCS_prev <= nCS_sync2;
+        nCS_prev  <= nCS_stable;
+        SCLK_prev <= SCLK_stable;
     end
 end
+
+wire SCLK_rising = ~SCLK_prev & SCLK_stable;
+wire nCS_rising  = ~nCS_prev & nCS_stable;
+
 
 //bit counter and shift register
 
@@ -60,7 +66,7 @@ always @(posedge clk or negedge rst_n) begin
         bit_count <= 5'd0;
         shift_reg <= 16'b0;
     end else begin
-        if (!nCS_sync2) begin //spi transaction
+        if (!nCS_stable) begin //spi transaction
             if (SCLK_rising) begin
                 shift_reg <= {shift_reg[14:0], COPI_data};
                 bit_count <= bit_count + 1'b1;
@@ -74,7 +80,7 @@ end
 //transaction handshake
 
 reg transaction_ready;
-reg transaction_processed;
+reg transaction_processed;       
 
 always @(posedge clk or negedge rst_n) begin
     if(!rst_n) begin
@@ -97,16 +103,21 @@ wire write_bit = shift_reg[15];
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-        uo_out  <= 8'h00;
-        uio_out <= 8'h00;
+        en_reg_out_7_0   <= 8'h00;
+        en_reg_out_15_8  <= 8'h00;
+        en_reg_pwm_7_0   <= 8'h00;
+        en_reg_pwm_15_8  <= 8'h00;
+        pwm_duty_cycle   <= 8'h00;
         transaction_processed <= 1'b0;
     end else if (transaction_ready && !transaction_processed) begin 
         //updating reg only after entire transaction complete
         if (write_bit && reg_addr <= MAX_ADDRESS) begin
             case (reg_addr)
-                7'h00: uo_out  <= data;
-                7'h01: uio_out <= data;
-                //0x02-0x04 reserved for PWM
+                7'h00: en_reg_out_7_0   <= data;
+                7'h01: en_reg_out_15_8  <= data;
+                7'h02: en_reg_pwm_7_0   <= data;
+                7'h03: en_reg_pwm_15_8  <= data;
+                7'h04: pwm_duty_cycle   <= data;
                 default: ;   
             endcase
         end
