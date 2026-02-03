@@ -28,10 +28,23 @@ module tt_um_uwasic_onboarding_Deyora (
   //Create wires to refer to the values of the registers
   wire [7:0] en_reg_out_7_0;
   wire [7:0] en_reg_out_15_8;
+  wire [7:0] en_reg_pwm_7_0;
   wire [7:0] en_reg_pwm_15_8;
   wire [7:0] pwm_duty_cycle;
 
-   // Instantiate the PWM module
+  spi_peripheral spi_inst (
+    .clk(clk),
+    .rst_n(rst_n),
+    .nCS(ui_in[2]),
+    .SCLK(ui_in[0]),
+    .COPI(ui_in[1]),
+    .en_reg_out_7_0(en_reg_out_7_0),
+    .en_reg_out_15_8(en_reg_out_15_8),
+    .en_reg_pwm_7_0(en_reg_pwm_7_0),
+    .en_reg_pwm_15_8(en_reg_pwm_15_8),
+    .pwm_duty_cycle(pwm_duty_cycle)
+  );
+    // Instantiate the PWM module
   pwm_peripheral pwm_peripheral_inst (
     .clk(clk),
     .rst_n(rst_n),
@@ -43,4 +56,5 @@ module tt_um_uwasic_onboarding_Deyora (
     .out({uio_out, uo_out})
   );
 
+   
 endmodule
