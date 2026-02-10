@@ -11,11 +11,11 @@ from cocotb.utils import get_sim_time
 
 async def await_half_sclk(dut):
     """Wait for the SCLK signal to go high or low."""
-    start_time = cocotb.utils.get_sim_time(unit="ns")
+    start_time = cocotb.utils.get_sim_time(units="ns")
     while True:
         await ClockCycles(dut.clk, 1)
         # Wait for half of the SCLK period (10 us)
-        if (start_time + 100*100*0.5) < cocotb.utils.get_sim_time(unit="ns"):
+        if (start_time + 100*100*0.5) < cocotb.utils.get_sim_time(units="ns"):
             break
     return
 
@@ -89,7 +89,7 @@ async def test_spi(dut):
     dut._log.info("Start SPI test")
 
     # Set the clock period to 100 ns (10 MHz)
-    clock = Clock(dut.clk, 100, unit="ns")
+    clock = Clock(dut.clk, 100, units="ns")
     cocotb.start_soon(clock.start())
 
     # Reset
@@ -154,7 +154,7 @@ async def test_spi(dut):
 async def test_pwm_freq(dut):
     """Verify PWM frequency is ~3kHz at v0%, 50%, 100% duty cycles."""
     dut._log.info("Starting PWM frequency test")
-    cocotb.start_soon(Clock(dut.clk, 100, unit="ns").start()) 
+    cocotb.start_soon(Clock(dut.clk, 100, units="ns").start()) 
 
     await send_spi_transaction(dut, 1, 0x00, 0x01)
     await send_spi_transaction(dut, 1, 0x02, 0x01)
@@ -178,7 +178,7 @@ async def test_pwm_freq(dut):
         for _ in range(10000): # safety timeout
             await Edge(dut.uo_out)
             if dut.uo_out.value[0] == 1:
-                t1 = get_sim_time(unit="ns")
+                t1 = get_sim_time(units="ns")
                 break
 
         if t1 is None: raise AssertionError("Timeout: First rising edge not detected")
@@ -189,7 +189,7 @@ async def test_pwm_freq(dut):
         for _ in range(10000): #safety timoout
             await Edge(dut.uo_out)
             if dut.uo_out.value[0] == 1:
-                t2 = get_sim_time(unit="ns")
+                t2 = get_sim_time(units="ns")
                 break
 
         if t2 is None: raise AssertionError("Timeout: Second rising edge not detected")
@@ -204,7 +204,7 @@ async def test_pwm_freq(dut):
 async def test_pwm_duty(dut):
     """Verify duty cycle pulse width accuracy."""
     dut._log.info("Starting PWM duty cycle test")
-    cocotb.start_soon(Clock(dut.clk, 100, unit="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 100, units="ns").start())
 
     await send_spi_transaction(dut, 1, 0x00, 0x01) 
     await send_spi_transaction(dut, 1, 0x02, 0x01) 
@@ -220,7 +220,7 @@ async def test_pwm_duty(dut):
         for _ in range(10000):
             await Edge(dut.uo_out)
             if dut.uo_out.value[0] == 1:
-                t_rise1 = get_sim_time(unit="ns")
+                t_rise1 = get_sim_time(units="ns")
                 break
 
         if t_rise1 is None: raise AssertionError("Timeout: Rising edge 1 not detected")
@@ -230,7 +230,7 @@ async def test_pwm_duty(dut):
         for _ in range(10000):
             await Edge(dut.uo_out)
             if dut.uo_out.value[0] == 0:
-                t_fall = get_sim_time(unit="ns")
+                t_fall = get_sim_time(units="ns")
                 break
 
         if t_fall is None: raise AssertionError("Timeout: Falling edge not detected")
@@ -240,7 +240,7 @@ async def test_pwm_duty(dut):
         for _ in range(10000):
             await Edge(dut.uo_out)
             if dut.uo_out.value[0] == 1:
-                t_rise2 = get_sim_time(unit="ns")
+                t_rise2 = get_sim_time(units="ns")
                 break
 
         if t_rise2 is None: raise AssertionError("Timeout: Rising edge 2 not detected")
