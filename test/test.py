@@ -11,11 +11,11 @@ from cocotb.utils import get_sim_time
 
 async def await_half_sclk(dut):
     """Wait for the SCLK signal to go high or low."""
-    start_time = cocotb.utils.get_sim_time(units="ns")
+    start_time = get_sim_time()
     while True:
         await ClockCycles(dut.clk, 1)
         # Wait for half of the SCLK period (10 us)
-        if (start_time + 100*100*0.5) < cocotb.utils.get_sim_time(unit="ns"):
+        if (start_time + 100*100*0.5) < get_sim_time():
             break
     return
 
@@ -89,7 +89,7 @@ async def test_spi(dut):
     dut._log.info("Start SPI test")
 
     # Set the clock period to 100 ns (10 MHz)
-    clock = Clock(dut.clk, 100, units="ns")
+    clock = Clock(dut.clk, 100)
     cocotb.start_soon(clock.start())
 
     # Reset
@@ -166,7 +166,7 @@ async def wait_lsb_transition(dut, start_level, end_level):
 async def test_pwm_freq(dut):
     dut._log.info("Test PWM output frequency (~3 kHz)")
 
-    cocotb.start_soon(Clock(dut.clk, 100, unit="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 100).start())
 
     #reset
     dut.ena.value = 1
@@ -180,10 +180,10 @@ async def test_pwm_freq(dut):
     await send_spi_transaction(dut, 1, 0x04, 128)
 
     await wait_lsb_transition(dut, 0, 1) #measuring the period
-    t1 = get_sim_time(units="us")
+    t1 = get_sim_time() / 1000.0
 
     await wait_lsb_transition(dut, 0, 1)
-    t2 = get_sim_time(units="us")
+    t2 = get_sim_time() / 1000.0
 
     period_us = t2 - t1
     freq = 1e6 / period_us
@@ -197,7 +197,7 @@ async def test_pwm_freq(dut):
 async def test_pwm_duty(dut):
     dut._log.info("Test PWM duty cycle")
 
-    cocotb.start_soon(Clock(dut.clk, 100, unit="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 100).start())
 
     dut.ena.value = 1
     dut.rst_n.value = 0
@@ -212,13 +212,13 @@ async def test_pwm_duty(dut):
     await ClockCycles(dut.clk, 2000)
 
     await wait_lsb_transition(dut, 0, 1)
-    t_rise = get_sim_time(units="us")
+    t_rise = get_sim_time() / 1000.0
 
     await wait_lsb_transition(dut, 1, 0)
-    t_fall = get_sim_time(units="us")
+    t_fall = get_sim_time() / 1000.0
 
     await wait_lsb_transition(dut, 0, 1)
-    t_next = get_sim_time(units="us")
+    t_next = get_sim_time() / 1000.0
 
     high = t_fall - t_rise
     period = t_next - t_rise
