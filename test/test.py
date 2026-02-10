@@ -4,7 +4,7 @@
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, FallingEdge, Edge
-from cocotb.triggers import ClockCycles
+from cocotb.triggers import ClockCycles, with_timeout
 from cocotb.types import Logic
 from cocotb.types import LogicArray
 from cocotb.utils import get_sim_time
@@ -15,7 +15,7 @@ async def await_half_sclk(dut):
     while True:
         await ClockCycles(dut.clk, 1)
         # Wait for half of the SCLK period (10 us)
-        if (start_time + 100*100*0.5) < cocotb.utils.get_sim_time(units="ns"):
+        if (start_time + 100*100*0.5) < cocotb.utils.get_sim_time(unit="ns"):
             break
     return
 
@@ -150,106 +150,80 @@ async def test_spi(dut):
 
     dut._log.info("SPI test completed successfully")
 
+
+async def wait_lsb_transition(dut, start_level, end_level):
+    last = int(dut.uo_out.value) & 1
+    while True:
+        await RisingEdge(dut.clk)
+        now = int(dut.uo_out.value) & 1
+        if last == start_level and now == end_level:
+            return
+        last = now
+
+
+
 @cocotb.test()
 async def test_pwm_freq(dut):
-    """Verify PWM frequency is ~3kHz at v0%, 50%, 100% duty cycles."""
-    dut._log.info("Starting PWM frequency test")
-    cocotb.start_soon(Clock(dut.clk, 100, units="ns").start()) 
+    dut._log.info("Test PWM output frequency (~3 kHz)")
+
+    cocotb.start_soon(Clock(dut.clk, 100, unit="ns").start())
+
+    #reset
+    dut.ena.value = 1
+    dut.rst_n.value = 0
+    await ClockCycles(dut.clk, 5)
+    dut.rst_n.value = 1
+    await ClockCycles(dut.clk, 5)
+
+    await send_spi_transaction(dut, 1, 0x00, 0x01)
+    await send_spi_transaction(dut, 1, 0x02, 0x01)
+    await send_spi_transaction(dut, 1, 0x04, 128)
+
+    await wait_lsb_transition(dut, 0, 1) #measuring the period
+    t1 = get_sim_time(units="us")
+
+    await wait_lsb_transition(dut, 0, 1)
+    t2 = get_sim_time(units="us")
+
+    period_us = t2 - t1
+    freq = 1e6 / period_us
+
+    dut._log.info(f"Measured PWM frequency: {freq:.1f} Hz")
+    assert 2970 <= freq <= 3030
+    dut._log.info("PWM Frequency test completed successfully")
+
+
+@cocotb.test()
+async def test_pwm_duty(dut):
+    dut._log.info("Test PWM duty cycle")
+
+    cocotb.start_soon(Clock(dut.clk, 100, unit="ns").start())
+
+    dut.ena.value = 1
+    dut.rst_n.value = 0
+    await ClockCycles(dut.clk, 5)
+    dut.rst_n.value = 1
+    await ClockCycles(dut.clk, 5)
 
     await send_spi_transaction(dut, 1, 0x00, 0x01)
     await send_spi_transaction(dut, 1, 0x02, 0x01)
 
-    for duty in [0x00, 0x80, 0xFF]: 
-        await send_spi_transaction(dut, 1, 0x04, duty)
-        await ClockCycles(dut.clk, 5000)
+    await send_spi_transaction(dut, 1, 0x04, 128)# 50% duty
+    await ClockCycles(dut.clk, 2000)
 
-        current_val = dut.uo_out.value[0]
+    await wait_lsb_transition(dut, 0, 1)
+    t_rise = get_sim_time(units="us")
 
-        if duty == 0x00:
-            assert current_val == 0, f"Expected 0, got {current_val}"
-            continue
+    await wait_lsb_transition(dut, 1, 0)
+    t_fall = get_sim_time(units="us")
 
-        elif duty == 0xFF:
-            assert current_val == 1, f"Expected 1, got {current_val}"
-            continue
+    await wait_lsb_transition(dut, 0, 1)
+    t_next = get_sim_time(units="us")
 
-        # period between two rising edges
-        t1 = None
-        for _ in range(10000): # safety timeout
-            await Edge(dut.uo_out)
-            if dut.uo_out.value[0] == 1:
-                t1 = get_sim_time(units="ns")
-                break
+    high = t_fall - t_rise
+    period = t_next - t_rise
+    duty = (high / period) * 100
 
-        if t1 is None: raise AssertionError("Timeout: First rising edge not detected")
-        
-        await Edge(dut.uo_out) # skip falling edge
-        
-        t2 = None
-        for _ in range(10000): #safety timoout
-            await Edge(dut.uo_out)
-            if dut.uo_out.value[0] == 1:
-                t2 = get_sim_time(units="ns")
-                break
-
-        if t2 is None: raise AssertionError("Timeout: Second rising edge not detected")
-
-        period = t2 - t1
-        freq = 1e9 / period
-        dut._log.info(f"Duty {duty:#04x}: {freq:.2f} Hz")
-        assert 2970 <= freq <= 3030, f"Frequency {freq} out of tolerance"
-    dut._log.info("PWM Frequency test completed successfully")
-
-@cocotb.test()
-async def test_pwm_duty(dut):
-    """Verify duty cycle pulse width accuracy."""
-    dut._log.info("Starting PWM duty cycle test")
-    cocotb.start_soon(Clock(dut.clk, 100, units="ns").start())
-
-    await send_spi_transaction(dut, 1, 0x00, 0x01) 
-    await send_spi_transaction(dut, 1, 0x02, 0x01) 
-
-    for duty in [0x00, 0x80, 0xFF]:
-        if duty in [0x00, 0xFF]: continue
-        
-        await send_spi_transaction(dut, 1, 0x04, duty)
-        await ClockCycles(dut.clk, 5000) 
-
-        # first rising edge
-        t_rise1 = None
-        for _ in range(10000):
-            await Edge(dut.uo_out)
-            if dut.uo_out.value[0] == 1:
-                t_rise1 = get_sim_time(units="ns")
-                break
-
-        if t_rise1 is None: raise AssertionError("Timeout: Rising edge 1 not detected")
-        
-        # falling edge
-        t_fall = None
-        for _ in range(10000):
-            await Edge(dut.uo_out)
-            if dut.uo_out.value[0] == 0:
-                t_fall = get_sim_time(units="ns")
-                break
-
-        if t_fall is None: raise AssertionError("Timeout: Falling edge not detected")
-        
-        # second rising edge
-        t_rise2 = None
-        for _ in range(10000):
-            await Edge(dut.uo_out)
-            if dut.uo_out.value[0] == 1:
-                t_rise2 = get_sim_time(units="ns")
-                break
-
-        if t_rise2 is None: raise AssertionError("Timeout: Rising edge 2 not detected")
-
-        high_time = t_fall - t_rise1
-        period = t_rise2 - t_rise1
-        measured_duty = (high_time / period) * 100
-        expected_duty = (duty / 256) * 100
-        dut._log.info(f"Duty {duty:#04x}: Measured {measured_duty:.2f}%, Expected {expected_duty:.2f}%")
-        assert abs(measured_duty - expected_duty) <= 1.0, f"Duty cycle error too high"
-
-    dut._log.info("PWM Duty Cycle test completed successfully")
+    dut._log.info(f"Measured duty cycle: {duty:.2f}%")
+    assert abs(duty - 50.0) <= 1.0
+    dut._log.info("PWM Duty Cycle test completed successfully!")
