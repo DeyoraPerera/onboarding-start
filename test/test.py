@@ -4,20 +4,14 @@
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, FallingEdge, Edge
-from cocotb.triggers import ClockCycles, with_timeout
+from cocotb.triggers import ClockCycles, with_timeout, Timer
 from cocotb.types import Logic
 from cocotb.types import LogicArray
 from cocotb.utils import get_sim_time
 
 async def await_half_sclk(dut):
-    """Wait for the SCLK signal to go high or low."""
-    start_time = get_sim_time()
-    while True:
-        await ClockCycles(dut.clk, 1)
-        # Wait for half of the SCLK period (10 us)
-        if (start_time + 100*100*0.5) < get_sim_time():
-            break
-    return
+     # Half of 10us SCLK period = 5us
+    await Timer(5, units="us")
 
 def ui_in_logicarray(ncs, bit, sclk):
     """Setup the ui_in value as a LogicArray."""
@@ -84,12 +78,29 @@ async def send_spi_transaction(dut, r_w, address, data):
     await ClockCycles(dut.clk, 600)
     return ui_in_logicarray(ncs, bit, sclk)
 
+async def wait_lsb_transition(dut, start_level, end_level):
+    """Wait for a transition on the LSB of uo_out, ignoring 'X' states."""
+    #  wait for the signal to be valid (not X)
+    while not dut.uo_out.value.is_resolvable:
+        await RisingEdge(dut.clk)
+        
+    last = int(dut.uo_out.value) & 1
+    while True:
+        await RisingEdge(dut.clk)
+        if not dut.uo_out.value.is_resolvable:
+            continue
+            
+        now = int(dut.uo_out.value) & 1
+        if last == start_level and now == end_level:
+            return
+        last = now
+
 @cocotb.test()
 async def test_spi(dut):
     dut._log.info("Start SPI test")
 
     # Set the clock period to 100 ns (10 MHz)
-    clock = Clock(dut.clk, 100)
+    clock = Clock(dut.clk, 100, units="ns")
     cocotb.start_soon(clock.start())
 
     # Reset
@@ -151,53 +162,45 @@ async def test_spi(dut):
     dut._log.info("SPI test completed successfully")
 
 
-async def wait_lsb_transition(dut, start_level, end_level):
-    last = int(dut.uo_out.value) & 1
-    while True:
-        await RisingEdge(dut.clk)
-        now = int(dut.uo_out.value) & 1
-        if last == start_level and now == end_level:
-            return
-        last = now
-
-
-
 @cocotb.test()
 async def test_pwm_freq(dut):
-    dut._log.info("Test PWM output frequency (~3 kHz)")
+    """Test PWM output frequency (~3 kHz) using existing helper."""
+    dut._log.info("Start PWM Frequency test")
 
-    cocotb.start_soon(Clock(dut.clk, 100).start())
+    # start 10 MHz clock
+    cocotb.start_soon(Clock(dut.clk, 100, unit="ns").start())
 
-    #reset
+    # reset
     dut.ena.value = 1
     dut.rst_n.value = 0
     await ClockCycles(dut.clk, 5)
     dut.rst_n.value = 1
     await ClockCycles(dut.clk, 5)
 
-    await send_spi_transaction(dut, 1, 0x00, 0x01)
-    await send_spi_transaction(dut, 1, 0x02, 0x01)
-    await send_spi_transaction(dut, 1, 0x04, 128)
 
-    await wait_lsb_transition(dut, 0, 1) #measuring the period
-    t1 = get_sim_time() / 1000.0
+    await send_spi_transaction(dut, 1, 0x00, 0x01)  
+    await send_spi_transaction(dut, 1, 0x02, 0x01)  
+    await send_spi_transaction(dut, 1, 0x04, 128)   
 
+    # measuring the period
     await wait_lsb_transition(dut, 0, 1)
-    t2 = get_sim_time() / 1000.0
+    t1 = cocotb.utils.get_sim_time(units="us")
+    await wait_lsb_transition(dut, 0, 1)
+    t2 = cocotb.utils.get_sim_time(units="us")
 
     period_us = t2 - t1
     freq = 1e6 / period_us
 
     dut._log.info(f"Measured PWM frequency: {freq:.1f} Hz")
-    assert 2970 <= freq <= 3030
-    dut._log.info("PWM Frequency test completed successfully")
+    assert 2970 <= freq <= 3030, f"Frequency {freq:.1f} Hz out of tolerance (2970-3030 Hz)"
 
+    dut._log.info("PWM Frequency test completed successfully")
 
 @cocotb.test()
 async def test_pwm_duty(dut):
     dut._log.info("Test PWM duty cycle")
 
-    cocotb.start_soon(Clock(dut.clk, 100).start())
+    cocotb.start_soon(Clock(dut.clk, 100, units="ns").start())
 
     dut.ena.value = 1
     dut.rst_n.value = 0
