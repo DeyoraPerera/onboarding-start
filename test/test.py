@@ -78,22 +78,22 @@ async def send_spi_transaction(dut, r_w, address, data):
     await ClockCycles(dut.clk, 600)
     return ui_in_logicarray(ncs, bit, sclk)
 
-async def wait_lsb_transition(dut, start_level, end_level):
-    """Wait for a transition on the LSB of uo_out, ignoring 'X' states."""
-    #  wait for the signal to be valid (not X)
+async def wait_lsb_transition(dut, bit_idx, start_level, end_level):
+    """Wait for a transition on a given bit of uo_out, ignoring 'X' states."""
     while not dut.uo_out.value.is_resolvable:
         await RisingEdge(dut.clk)
-        
-    last = int(dut.uo_out.value) & 1
+
+    last = (int(dut.uo_out.value) >> bit_idx) & 1
     while True:
         await RisingEdge(dut.clk)
         if not dut.uo_out.value.is_resolvable:
             continue
-            
-        now = int(dut.uo_out.value) & 1
+        now = (int(dut.uo_out.value) >> bit_idx) & 1
         if last == start_level and now == end_level:
             return
         last = now
+
+
 
 @cocotb.test()
 async def test_spi(dut):
@@ -164,69 +164,108 @@ async def test_spi(dut):
 
 @cocotb.test()
 async def test_pwm_freq(dut):
-    """Test PWM output frequency (~3 kHz) using existing helper."""
-    dut._log.info("Start PWM Frequency test")
+    """Test PWM output frequency (~3 kHz) on all uo pins."""
+    dut._log.info("Start PWM Frequency test on all uo pins")
 
-    # start 10 MHz clock
     cocotb.start_soon(Clock(dut.clk, 100, units="ns").start())
 
-    # reset
+    #reset
     dut.ena.value = 1
     dut.rst_n.value = 0
     await ClockCycles(dut.clk, 5)
     dut.rst_n.value = 1
     await ClockCycles(dut.clk, 5)
 
+    #enabling all pins for output and PWM mode
+    await send_spi_transaction(dut, 1, 0x00, 0xFF) # enable output for uo_out[7:0]
+    await send_spi_transaction(dut, 1, 0x01, 0xFF) # enable output for uio_out[7:0]
+    await send_spi_transaction(dut, 1, 0x02, 0xFF) # enable PWM for uo_out[7:0]
+    await send_spi_transaction(dut, 1, 0x03, 0xFF) # enable PWM for uio_out[7:0]
+    await send_spi_transaction(dut, 1, 0x04, 128)  # setting 50% duty cycle
 
-    await send_spi_transaction(dut, 1, 0x00, 0x01)  
-    await send_spi_transaction(dut, 1, 0x02, 0x01)  
-    await send_spi_transaction(dut, 1, 0x04, 128)   
+    #looping through all uo pins
+    num_pins = len(dut.uo_out.value)
+    for bit_idx in range(num_pins):
+        dut._log.info(f"Checking PWM on uo[{bit_idx}]...")
+        
+        await wait_lsb_transition(dut, bit_idx, 1, 0)
+        await wait_lsb_transition(dut, bit_idx, 0, 1)
+        t1 = get_sim_time(units="us")
+        
+        await wait_lsb_transition(dut, bit_idx, 1, 0)
+        await wait_lsb_transition(dut, bit_idx, 0, 1)
+        t2 = get_sim_time(units="us")
 
-    # measuring the period
-    await wait_lsb_transition(dut, 0, 1)
-    t1 = cocotb.utils.get_sim_time(units="us")
-    await wait_lsb_transition(dut, 0, 1)
-    t2 = cocotb.utils.get_sim_time(units="us")
+        period_us = t2 - t1
+        freq = 1e6 / period_us
 
-    period_us = t2 - t1
-    freq = 1e6 / period_us
-
-    dut._log.info(f"Measured PWM frequency: {freq:.1f} Hz")
-    assert 2970 <= freq <= 3030, f"Frequency {freq:.1f} Hz out of tolerance (2970-3030 Hz)"
+        dut._log.info(f"uo[{bit_idx}] Measured PWM frequency: {freq:.1f} Hz")
+        assert 2970 <= freq <= 3030, f"uo[{bit_idx}] Frequency {freq:.1f} Hz out of tolerance"
 
     dut._log.info("PWM Frequency test completed successfully")
 
+
 @cocotb.test()
 async def test_pwm_duty(dut):
-    dut._log.info("Test PWM duty cycle")
+    """Verify PWM duty cycle at multiple points including corner cases."""
+
+    dut._log.info("Start PWM Duty Cycle Test")
 
     cocotb.start_soon(Clock(dut.clk, 100, units="ns").start())
 
+    #reset
     dut.ena.value = 1
     dut.rst_n.value = 0
     await ClockCycles(dut.clk, 5)
     dut.rst_n.value = 1
     await ClockCycles(dut.clk, 5)
 
-    await send_spi_transaction(dut, 1, 0x00, 0x01)
-    await send_spi_transaction(dut, 1, 0x02, 0x01)
+    await send_spi_transaction(dut, 1, 0x00, 0xFF)
+    await send_spi_transaction(dut, 1, 0x02, 0xFF)
 
-    await send_spi_transaction(dut, 1, 0x04, 128)# 50% duty
-    await ClockCycles(dut.clk, 2000)
+    #testing several duty cycle values
+    test_values = [0, 1, 64, 128, 192, 254, 255]
 
-    await wait_lsb_transition(dut, 0, 1)
-    t_rise = get_sim_time() / 1000.0
+    for val in test_values:
 
-    await wait_lsb_transition(dut, 1, 0)
-    t_fall = get_sim_time() / 1000.0
+        dut._log.info(f"Testing duty cycle value = {val}")
 
-    await wait_lsb_transition(dut, 0, 1)
-    t_next = get_sim_time() / 1000.0
+        await send_spi_transaction(dut, 1, 0x04, val)
+        await ClockCycles(dut.clk, 3000)
 
-    high = t_fall - t_rise
-    period = t_next - t_rise
-    duty = (high / period) * 100
+        #0% duty-always low
+        if val == 0:
+            assert (int(dut.uo_out.value) & 1) == 0, \
+                "PWM should remain low at 0% duty"
+            continue
 
-    dut._log.info(f"Measured duty cycle: {duty:.2f}%")
-    assert abs(duty - 50.0) <= 1.0
+        #100% duty-always high 
+        if val == 255:
+            assert (int(dut.uo_out.value) & 1) == 1, \
+                "PWM should remain high at 100% duty"
+            continue
+
+        
+        await wait_lsb_transition(dut, 0, 0, 1)
+        t_rise = get_sim_time(units="us")
+
+        await wait_lsb_transition(dut, 0, 1, 0)
+        t_fall = get_sim_time(units="us")
+
+        await wait_lsb_transition(dut, 0, 0, 1)
+        t_next = get_sim_time(units="us")
+
+        high_time = t_fall - t_rise
+        period = t_next - t_rise
+        measured_duty = (high_time / period) * 100
+
+        expected_duty = (val / 255.0) * 100
+
+        dut._log.info(
+            f"Expected ~{expected_duty:.2f}% | Measured {measured_duty:.2f}%"
+        )
+
+        assert abs(measured_duty - expected_duty) <= 2.0, \
+            f"Duty mismatch for value {val}"
+
     dut._log.info("PWM Duty Cycle test completed successfully!")
