@@ -16,28 +16,39 @@ module spi_peripheral (
 
 localparam [6:0] MAX_ADDRESS = 7'd4; //max register address
 
-//signal synchronization
 
-reg [1:0] nCS_sync, SCLK_sync, COPI_sync;// 2 stage flip flops
+//Fixed 2-FF Synchronizers 
 
-always @ (posedge clk or negedge rst_n) begin //executes on every posedge and if rst_n goes low
+reg nCS_meta,  nCS_sync;
+reg SCLK_meta, SCLK_sync;
+reg COPI_meta, COPI_sync;
 
-    if(!rst_n) begin
-        nCS_sync <= 2'b11; //both ff initialized to high bc active low
-        SCLK_sync <= 2'b00; 
-        COPI_sync <= 2'b00;
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        nCS_meta  <= 1'b1;  // idle high
+        nCS_sync  <= 1'b1;
+
+        SCLK_meta <= 1'b0;  // idle low (mode 0)
+        SCLK_sync <= 1'b0;
+
+        COPI_meta <= 1'b0;
+        COPI_sync <= 1'b0;
     end else begin
-        //concatenating 2 values prev value from first flip-flop and current raw async input
-        nCS_sync <= {nCS_sync[0], nCS}; 
-        SCLK_sync <= {SCLK_sync[0], SCLK};
-        COPI_sync <= {COPI_sync[0], COPI};
-    end
+        nCS_meta  <= nCS;
+        nCS_sync  <= nCS_meta;
 
+        SCLK_meta <= SCLK;
+        SCLK_sync <= SCLK_meta;
+
+        COPI_meta <= COPI;
+        COPI_sync <= COPI_meta;
+    end
 end
 
-wire nCS_stable = nCS_sync[1]; //taking the stable value
-wire SCLK_stable = SCLK_sync[1]; //taking the stable value
-wire COPI_data = COPI_sync[0];
+// Use only stage 2 outputs
+wire nCS_stable  = nCS_sync;
+wire SCLK_stable = SCLK_sync;
+wire COPI_data   = COPI_sync;
 
 
 //edge detection
